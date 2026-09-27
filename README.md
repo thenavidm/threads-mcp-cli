@@ -112,7 +112,7 @@ can do, the other can.
 | 1 | [What you can ask it](#1-what-you-can-ask-it) | Real prompts, not features |
 | 2 | [Install](#2-install) | Every client, copy and paste |
 | 3 | [Connect your account](#3-connect-your-account) | The Meta app, in about ten minutes |
-| 4 | [What it costs to have connected](#4-what-it-costs-to-have-connected) | Tokens per turn, and how to spend less |
+| 4 | [What it costs to have connected](#4-what-it-costs-to-have-connected) | Measured in Claude Code, and how to spend less |
 | 5 | [Tools](#5-tools) | All 30, with arguments |
 | 6 | [Writing safely](#6-writing-safely) | Why posting asks twice |
 | 7 | [Writing posts](#7-writing-posts) | Limits, media, threads, carousels |
@@ -371,53 +371,40 @@ Tokens from Meta's Graph API Explorer are **short-lived** and stop working in an
 
 ## 4. What it costs to have connected
 
-Both surfaces carry the same 30 tools. They differ in when you pay for them.
+Both surfaces are the same program with the same 30 tools. The
+difference is when the model pays for them. Measured in Claude Code:
 
-| Question | MCP server | CLI |
+| | MCP server | CLI |
 |---|---|---|
-| Loaded every turn | **~9,450 tokens** | nothing |
-| Loaded when Threads comes up | nothing more | ~2,050, once |
-| Works on claude.ai and mobile | yes | no, there is no shell there |
-| Works in a script, cron or CI | no | yes |
-| You invoke it by | asking in plain language | typing a command |
+| Every message, with every tool loaded | 12,700 tokens | nothing |
+| Every message, Claude Code's default | 200 tokens | nothing |
+| When Threads comes up | nothing more, or the tools it picks | 3,100 tokens for `SKILL.md`, once |
+| 20 messages with Threads in 1, every tool loaded | 255,000 tokens | 3,100 tokens |
 
-An MCP server sends its whole tool list to the model on **every turn**, whether
-you mention Threads or not. That is the price of being connected at all, before
-you ask anything. It is not unusual, and almost nobody publishes it.
+Claude Code's [tool search](https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search)
+is on by default: it sends only the tool names and the server instructions,
+and loads a tool's full definition when the model reaches for it. An app that
+loads every tool up front pays the first line on every message, whether
+Threads comes up or not. With the skill added, Claude Code also lists its
+one-line description, about 140 tokens.
 
-The 9,450 is measured, not estimated: a real `initialize` and `tools/list`
-handshake against this server returns 37,806 characters of tool definitions and
-server instructions. The CLI's 2,050 is the size of the [SKILL.md](SKILL.md)
-that ships in the package, and an agent only reads it once the subject comes up.
+Where the tokens go, with every tool loaded:
 
-Over twenty turns where Threads comes up once, that is roughly 189,000 tokens
-against 2,050. When the whole conversation is about your profile, the gap closes
-and the server is the better experience, because you ask in plain language
-instead of remembering flags.
-
-### Where the 9,450 goes
-
-Worth knowing, because it is mostly not something anyone can write away:
-
-| Part of the payload | Share |
+| Part of the tool list | Share |
 |---|---|
-| JSON Schema structure: types, required lists, nesting | **53%** |
+| JSON Schema structure: types, required lists, nesting | 53% |
 | Argument descriptions | 30% |
 | Tool descriptions | 17% |
 
-Half of it is the protocol serialising every tool as JSON Schema. Any MCP server
-with this many tools pays the same. The other half is prose, and it is what makes
-the tools usable without guessing.
+To spend less, turn the server off when you are not using it, which in Claude
+Code is the `/mcp` panel. `THREADS_READ_ONLY=1` takes the 12 write tools off the list, leaving 18.
+Or install the CLI and add the server on the days it earns its place.
 
-### Spending less
-
-**Turn the server off when you are not using Threads.** In Claude Code that is
-`@threads` to toggle, and every client has an equivalent.
-`THREADS_READ_ONLY=1` drops it to the 18 reading tools, about 5,060 tokens.
-
-**Or install the CLI and skip the server.** All 30 tools stay reachable, the
-standing cost falls to nothing until you type a command, and you connect the
-server later on the days it earns its place.
+Measured on 2026-09-27 with Claude Code 2.1.257 on Claude Opus 5: one
+short prompt with and without the server connected, once with
+`ENABLE_TOOL_SEARCH=false` and once with the default, the difference read
+from the API's own usage figures. `SKILL.md` was measured the same way. Other
+apps and models count tokens a little differently.
 
 ## 5. Tools
 
@@ -894,7 +881,7 @@ protocol.
 <details>
 <summary><b>Should I use the MCP server or the CLI?</b></summary>
 
-Use the MCP server in an app with no terminal, like Claude Desktop's chat. Use the CLI anywhere commands run: an agent like Claude Code, Codex or OpenCode, a script or a cron job. The MCP server sends its full tool list to the model on every turn, and the CLI costs nothing until it runs.
+Use the MCP server in an app with no terminal, like Claude Desktop's chat. Use the CLI anywhere commands run: an agent like Claude Code, Codex or OpenCode, a script or a cron job. The MCP server's tools take up context on every message, and the CLI costs nothing until it runs.
 
 </details>
 
