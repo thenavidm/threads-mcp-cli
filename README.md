@@ -1,4 +1,4 @@
-<img src="https://cdn.navid.media/connectors/threads-icon.png" alt="Threads" width="88">
+<img src="https://cdn.navid.me/connectors/threads-icon.png" alt="Threads" width="88">
 
 # Threads MCP Server & CLI
 
@@ -20,9 +20,9 @@ Publishing and deleting ask for confirmation. Everything else is a read.
 
 One command to authorise, and the 60-day token refreshes itself from then on.
 
-Built and maintained by [Navid Moazzez](https://navid.me?utm_source=github&utm_medium=referral&utm_campaign=threads-mcp-cli&utm_content=readme).
+Built and maintained by [Navid Moazzez](https://navid.me?utm_source=github&utm_medium=referral&utm_campaign=threads-mcp-cli&utm_content=readme). Built on [Slipway](https://github.com/thenavidm/slipway), which turns one definition of each tool into the MCP server and the CLI.
 
-<img src="https://cdn.navid.media/repos/threads-mcp.gif?v=2" alt="Claude Code using the Threads MCP server" width="520">
+<img src="https://cdn.navid.me/repos/threads-mcp.gif" alt="Claude Code using the Threads MCP server" width="520">
 
 ## Two ways to use it
 
@@ -60,26 +60,27 @@ parse the message:
 | Code | Means |
 |---|---|
 | 0 | It worked |
-| 1 | Unknown command, or one hidden by `THREADS_READ_ONLY=1` |
-| 2 | Bad arguments, or a write refused for want of `--confirm` |
+| 1 | An unexpected error, worth an issue |
+| 2 | You typed it wrong, or the guard refused a write: a missing or bad flag, an unknown command, a command hidden by `THREADS_READ_ONLY=1`, a post without `--confirm`, Meta rejecting the arguments |
 | 3 | Not found |
-| 4 | The token was rejected |
-| 5 | The Threads API failed |
+| 4 | The token was rejected, or lacks the permission |
+| 5 | The Threads API failed or could not be reached |
 | 7 | Rate limited, back off and retry |
 | 10 | Nothing is configured yet, run `threads-cli login` |
 
 ```bash
-if ! threads-cli create-post --text "$BODY" --confirm --agent > /tmp/out.json; then
-  case $? in
-    2)  echo "bad arguments, not retrying" >&2; exit 1 ;;
-    7)  echo "rate limited, backing off" >&2 ;;
-    10) echo "no profile connected, run threads-cli login" >&2; exit 1 ;;
-    *)  echo "failed, will retry" >&2 ;;
-  esac
-fi
+threads-cli create-post --text "$BODY" --confirm --agent > /tmp/out.json
+case $? in
+  0) ;;
+  2|4) echo "fix the command or the token, not retrying" >&2; exit 1 ;;
+  7) echo "rate limited, backing off" >&2 ;;
+  10) echo "no profile connected, run threads-cli login" >&2; exit 1 ;;
+  5) echo "Threads failed, will retry" >&2 ;;
+  *) echo "unexpected, see the error" >&2; exit 1 ;;
+esac
 ```
 
-### MCP server, for AI agents
+### MCP server, for your AI app
 
 `threads-mcp` is what Claude Code, Claude Desktop, Cursor and the rest launch.
 You never run it by hand:
@@ -92,7 +93,9 @@ No credentials go in that line, because `threads-cli login` already stored the
 token. Then just ask: _"which of my posts this month actually worked, ranked by
 engagement against views?"_
 
-Every other client is in [section 2](#2-install).
+Every other client is in [section 2](#2-install). Each post, reply, repost and
+delete waits for your approval in the client, as [section 6](#6-writing-safely)
+explains.
 
 ### Which one
 
@@ -104,6 +107,32 @@ Every other client is in [section 2](#2-install).
 
 They are the same program reading the same tool definitions, so anything one
 can do, the other can.
+
+## Features
+
+Every tool is both a command and an MCP tool, with the same name. The command
+is the tool name with dashes.
+
+| Capability | CLI command | MCP tool |
+|---|---|---|
+| Which profile, and the daily quota | `threads-cli whoami` / `get-publishing-limit` | `whoami` / `get_publishing_limit` |
+| List connected profiles | `threads-cli list-accounts` | `list_accounts` |
+| Post, thread or carousel | `threads-cli create-post` / `create-thread` / `create-carousel` | `create_post` / `create_thread` / `create_carousel` |
+| Stage a post, publish it later | `threads-cli stage-post` / `publish-staged` / `get-container-status` | `stage_post` / `publish_staged` / `get_container_status` |
+| Quote and repost | `threads-cli quote-post` / `repost` | `quote_post` / `repost` |
+| Delete one of your posts | `threads-cli delete-post` | `delete_post` |
+| Reply, and read replies | `threads-cli reply-to` / `get-replies` / `get-conversation` / `get-all-replies` | `reply_to` / `get_replies` / `get_conversation` / `get_all_replies` |
+| Hide a reply, or work the approval queue | `threads-cli hide-reply` / `get-pending-replies` / `manage-pending-reply` | `hide_reply` / `get_pending_replies` / `manage_pending_reply` |
+| Read your posts | `threads-cli get-posts` / `get-post` | `get_posts` / `get_post` |
+| Insights and what worked | `threads-cli get-post-insights` / `get-account-insights` / `get-top-posts` | `get_post_insights` / `get_account_insights` / `get_top_posts` |
+| Who follows you | `threads-cli get-follower-demographics` | `get_follower_demographics` |
+| Search posts and topic tags | `threads-cli search-keyword` / `search-topic-tag` | `search_keyword` / `search_topic_tag` |
+| Look up a public profile | `threads-cli lookup-profile` | `lookup_profile` |
+| Geo-gating countries | `threads-cli list-allowlisted-countries` | `list_allowlisted_countries` |
+| Keep the token alive | `threads-cli refresh-token`, or `threads-cli refresh` for every stored one | `refresh_token` |
+| Check your setup | `threads-cli doctor` | not a tool |
+
+All 30 with their arguments are in [section 5](#5-tools).
 
 ## Contents
 
@@ -123,6 +152,7 @@ can do, the other can.
 | 12 | [Your data](#12-your-data) | What is stored and where |
 | 13 | [Risks](#13-risks) | Read this before you install |
 | 14 | [Troubleshooting](#14-troubleshooting) | When something breaks |
+| 15 | [FAQ](#15-faq-) | Including what an MCP server is |
 
 ## 1. What you can ask it
 
@@ -143,7 +173,7 @@ The third one is the point. Threads reports views alongside likes, replies, repo
 
 The long version, every step with what to do when one fails, is in [INSTALL.md](INSTALL.md).
 
-Node 20 or newer. Nothing else.
+Node 22 or newer. Nothing else.
 
 Authorise first, in a terminal:
 
@@ -167,6 +197,8 @@ claude mcp add threads -- npx -y @thenavidm/threads-mcp-cli
 npm install -g @thenavidm/threads-mcp-cli
 threads-cli
 ```
+
+`threads-cli install claude-code` (or `codex`, `claude-desktop`, `cursor`, `vscode`, `gemini`) adds the server to a client in its own format; add `--dry-run` to see the change first.
 
 That gives you two commands: `threads-mcp` is the server your AI tools launch,
 and `threads-cli` is the one you type. Both are the same program.
@@ -275,7 +307,7 @@ THREADS_HTTP_TOKEN=$(openssl rand -hex 32) \
 threads-mcp --http
 ```
 
-Binds `127.0.0.1` by default. A Threads token can post as you, so put it behind a reverse proxy with TLS before you change `THREADS_HTTP_HOST`, and set `THREADS_HTTP_TOKEN` so the endpoint is not open. `GET /health` returns the tool count, the account count and each token's remaining days without authentication.
+Binds `127.0.0.1` by default, and will not start on any other address without `THREADS_HTTP_TOKEN`. A Threads token can post as you, so put it behind a reverse proxy with TLS before you change `THREADS_HTTP_HOST`. `GET /health` returns the name, version and tool count without authentication.
 
 ### Check it worked
 
@@ -374,12 +406,12 @@ Tokens from Meta's Graph API Explorer are **short-lived** and stop working in an
 Both surfaces are the same program with the same 30 tools. The
 difference is when the model pays for them. Measured in Claude Code:
 
-| | MCP server | CLI |
+| Cost | MCP server | CLI |
 |---|---|---|
-| Every message, with every tool loaded | 12,700 tokens | nothing |
-| Every message, Claude Code's default | 200 tokens | nothing |
-| When Threads comes up | nothing more, or the tools it picks | 3,100 tokens for `SKILL.md`, once |
-| 20 messages with Threads in 1, every tool loaded | 255,000 tokens | 3,100 tokens |
+| Every message, with every tool loaded | 11,400 tokens | nothing |
+| Every message, Claude Code's default | 1,060 tokens | nothing |
+| When Threads comes up | nothing more, or the tools it picks | 3,140 tokens for `SKILL.md`, once |
+| 20 messages with Threads in 1, every tool loaded | 227,000 tokens | 3,140 tokens |
 
 Claude Code's [tool search](https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search)
 is on by default: it sends only the tool names and the server instructions,
@@ -392,19 +424,27 @@ Where the tokens go, with every tool loaded:
 
 | Part of the tool list | Share |
 |---|---|
-| JSON Schema structure: types, required lists, nesting | 53% |
-| Argument descriptions | 30% |
-| Tool descriptions | 17% |
+| JSON Schema structure: types, required lists, nesting | 56% |
+| Argument descriptions | 28% |
+| Tool descriptions | 16% |
 
 To spend less, turn the server off when you are not using it, which in Claude
 Code is the `/mcp` panel. `THREADS_READ_ONLY=1` takes the 12 write tools off the list, leaving 18.
 Or install the CLI and add the server on the days it earns its place.
 
-Measured on 2026-09-27 with Claude Code 2.1.257 on Claude Opus 5: one
+Measured on 2026-10-05 with Claude Code 2.1.286 on Claude Opus 5.5: one
 short prompt with and without the server connected, once with
 `ENABLE_TOOL_SEARCH=false` and once with the default, the difference read
-from the API's own usage figures. `SKILL.md` was measured the same way. Other
-apps and models count tokens a little differently.
+from the API's own usage figures. `SKILL.md` was measured the same way, and the
+shares were counted with OpenAI's o200k tokenizer. Other apps and models count
+tokens a little differently.
+
+Against 1.1.2, measured the same day: every tool loaded costs 11,356 tokens
+instead of 12,745, tool search the same, and `SKILL.md` 68 more for the approval
+rule, `which` and the full exit codes. In Codex 0.159.3 on gpt-6.1-sol, the same
+task, "find the command that publishes a post staged earlier and the flags it
+requires", read a median of 84,035 input tokens on 2.0.0 against 84,054 on 1.1.2
+over the CLI (five runs each), and about 78,750 on both over MCP.
 
 ## 5. Tools
 
@@ -488,13 +528,13 @@ Three prompts: **triage-replies**, **draft-thread**, **what-worked**.
 
 A post is public the instant it lands. Threads has no edit endpoint, so correcting a typo means deleting and republishing, which loses that post's replies, likes and reposts, and spends one of the hundred deletions the account gets each day. There is no unsend and no revision history.
 
-So nine tools refuse to run without `confirm: true`:
+So nine tools need approval:
 
 `create_post`, `create_thread`, `create_carousel`, `publish_staged`, `quote_post`, `repost`, `reply_to`, `manage_pending_reply`, `delete_post`.
 
-The model has to set it deliberately, after reading a description that says why. That is a speed bump a careless call trips over and an intentional one clears in a single retry.
+In a terminal that is `--confirm`, which `--agent` never adds. Over MCP a person approves each call where the client can ask: Claude Code (2.1.246 and later) shows its own prompt, and a client that can show forms asks with an approval form whose one box starts unticked. Each approval is signed, bound to that exact call and works once. Where a client can do neither, the model's `confirm: true` counts, and it should pass it only when you asked for that exact post. `THREADS_CONFIRM=model` makes `confirm: true` enough everywhere, for an agent with no person to ask, such as a scheduled job.
 
-`hide_reply` is **not** guarded. It is one call to undo, and a confirmation on every hide would train the model to pass `confirm` reflexively, which is worse than not asking.
+`hide_reply` is **not** guarded. It is one call to undo, and an approval on every hide would only train you to click yes without reading, which is worse than not asking.
 
 ### Staging instead of posting
 
@@ -518,7 +558,7 @@ Keeps hiding replies and refreshing tokens; blocks posting, replying, reposting 
 
 Every tool carries MCP annotations, so a client can decide what to auto-approve:
 
-| | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
+| Tools | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
 | Reads | true | false | true |
 | `hide_reply`, `refresh_token`, `stage_post` | false | false | true |
@@ -532,7 +572,7 @@ Every tool carries MCP annotations, so a client can decide what to auto-approve:
 THREADS_AUDIT_LOG=~/.threads-mcp/writes.jsonl
 ```
 
-One JSON line per attempted write, allowed and blocked alike, with a timestamp and a one-line summary of what it was about to do.
+One JSON line per attempted write, allowed and blocked alike, with a timestamp, a one-line summary of what it was about to do, and who approved it: `person`, `client` or `flag`.
 
 ### Prompt injection
 
@@ -544,7 +584,7 @@ Everything you read from a search, a reply or a conversation is text other peopl
 
 Threads caps a post at 500 characters, and counts emoji as UTF-8 bytes. Those are two different limits and neither is what JavaScript measures:
 
-| | Reader sees | `.length` | UTF-8 bytes |
+| Text | Reader sees | `.length` | UTF-8 bytes |
 |---|---|---|---|
 | `👨‍👩‍👧‍👦` | 1 | 11 | 25 |
 | `é` | 1 | 1 or 2 | 2 or 3 |
@@ -567,7 +607,7 @@ Media, a link card, the topic tag and the reply control apply to the first post 
 
 Threads has no upload endpoint. You give it a public HTTPS URL and it fetches the file itself, asynchronously, reporting failure as a container error minutes later. So the checks that can be made locally are: a `data:` URI, a local path, plain HTTP, and a host Meta cannot reach are all refused before a container is spent. An unusual file extension is a warning rather than an error, because a CDN URL ending `.webp` may well be served as JPEG.
 
-| | Limits |
+| Media | Limits |
 |---|---|
 | Images | JPEG or PNG, 8MB, 320 to 1440px wide, 10:1 aspect ratio |
 | Video | MP4 or MOV, 1GB, 5 minutes, H264 or HEVC |
@@ -726,14 +766,15 @@ The catch is that an MCP server launched over stdio only exists while a client h
 
 ```
 src/
-  index.ts              entry: stdio, --http, login, refresh, doctor
+  index.ts              entry: both binaries, with Node's compile cache
+  app.ts                the Slipway app: tools, settings, login, refresh
+  guide.ts              server instructions, resources and prompts
   config.ts             credentials, and which profile acts
-  server.ts             tools, resources, prompts
-  safety.ts             the write guard and MCP annotations
-  doctor.ts             setup diagnosis, and `refresh`
+  doctor.ts             setup diagnosis, one probe per capability
 
   auth/
     login.ts            the OAuth flow on a loopback redirect
+    refresh.ts          `refresh`, extending every stored token now
     tokens.ts           exchange, refresh, and the 60-day arithmetic
     store.ts            the token file, 0600, written atomically
 
@@ -751,17 +792,17 @@ src/
     posts.ts            the tagged output format
 
   tools/
-    kit.ts              registration, guarding, pagination
+    kit.ts              the Slipway toolkit, and Meta's errors mapped to exit codes
     accounts.ts posts.ts replies.ts read.ts insights.ts discover.ts
 ```
 
-Two dependencies: the MCP SDK and zod.
+Two dependencies: [Slipway](https://github.com/thenavidm/slipway), which serves the tools over MCP and the CLI with one write guard, and zod.
 
 **Profile ids.** Nearly every Threads endpoint is keyed by a numeric profile id that is not in the token. Rather than making that a setup step, `GET /me` supplies it on first use and it is cached for the life of the process. Concurrent calls share one in-flight lookup.
 
 **Retries.** 5xx and Meta's quota codes back off exponentially with jitter. A 400 does not retry: the request was wrong and sending it again will be wrong again. Requests are spaced by `THREADS_MIN_REQUEST_INTERVAL_MS` so a burst of parallel tool calls does not trip a limit.
 
-**Errors.** Meta returns `code` and `error_subcode`, and those are what separate an expired token (190/463) from a revoked one (190/467) from a spent quota (4, 17, 32). All three arrive as HTTP 400. Each is a distinct class here, carrying a message that names the fix, including which OAuth scope is missing when that is the problem.
+**Errors.** Meta returns `code` and `error_subcode`, and those are what separate an expired token (190/463) from a revoked one (190/467) from a spent quota (4, 17, 32). All three arrive as HTTP 400. Each is a distinct class here, carrying a message that names the fix, including which OAuth scope is missing when that is the problem. The class, not the status, sets the exit code, and the code, subcode and trace id reach the model in the error's `details`.
 
 **Container polling.** Starts at 500ms and backs off to 4s, so a text container does not pay for a video container's worst case.
 
@@ -769,7 +810,7 @@ Two dependencies: the MCP SDK and zod.
 
 Nothing is uploaded anywhere but Threads.
 
-| | Where |
+| What | Where |
 |---|---|
 | Access tokens | `~/.threads-mcp/tokens.json`, mode 0600, or your client's config |
 | App id and secret | Your environment. Needed only by `login` |
@@ -810,7 +851,11 @@ If any of that is more than you want to hand an agent, `THREADS_READ_ONLY=1` giv
 | `get_follower_demographics` returns nothing | Under 100 followers, or `threads_manage_insights` is missing |
 | Container error a few minutes after posting | The media URL. It has to be public HTTPS, an image or video content type, and not redirect to a login page |
 | "still processing after 120s" | A long video. The container is not lost; `publish_staged` with that id still works for 24 hours |
-| "will not run without confirm: true" | Working as intended. See [section 6](#6-writing-safely) |
+| "will not run without --confirm" | Working as intended. See [section 6](#6-writing-safely) |
+| Claude Code asks before every post | Expected: posting, replying, reposting and deleting wait for your approval |
+| `claude -p` will not post | Headless Claude Code refuses tools that need a person. Give that agent `THREADS_CONFIRM=model` |
+| No approval form appears | The client cannot show forms, so the model's `confirm: true` counts, and only for a post you asked for |
+| A piped request gets no answer | Stdin closed before the answer. The MCP stdio binding stops a server when its input ends; keep stdin open until you read the answer, or use the CLI |
 | "is a Threads permalink" | Threads has no endpoint converting a permalink to an id. Use the numeric id from `get_posts` |
 | Rate limited | A rolling-24-hour quota. `get_publishing_limit` shows what is left |
 
@@ -839,7 +884,8 @@ Server not appearing at all: run the command your client runs, by hand, and read
 |---|---|---|
 | `THREADS_READ_ONLY` | `0` | `1` hides every write from the tool list, leaving 18 reads |
 | `THREADS_ALLOW_DESTRUCTIVE` | `1` | `0` blocks posting, replying and deleting |
-| `THREADS_AUDIT_LOG` | none | Append-only log of every attempted write |
+| `THREADS_AUDIT_LOG` | none | Append-only log of every attempted write, and who approved it |
+| `THREADS_CONFIRM` | `human` | `model` lets `confirm: true` alone approve over MCP, for an agent with no person to ask |
 
 ### Tuning
 
@@ -853,13 +899,16 @@ Server not appearing at all: run the command your client runs, by hand, and read
 | `THREADS_USER_AGENT` | `threads-mcp` | The User-Agent sent to Meta |
 | `THREADS_HTTP_PORT` | `8787` | For `--http` |
 | `THREADS_HTTP_HOST` | `127.0.0.1` | For `--http` |
-| `THREADS_HTTP_TOKEN` | none | Bearer token required by `--http` |
+| `THREADS_HTTP_TOKEN` | none | Bearer token required by `--http`; any address but localhost refuses to start without one |
+| `THREADS_SURFACE` | `full` | `search` lists three tools that find, describe and run the rest |
+| `THREADS_TOOL_TIMEOUT_MS` | none | Give up on any tool after this long |
+| `THREADS_DEBUG` | `0` | `1` prints debug lines on stderr |
 
 ## Versions
 
 See [CHANGELOG.md](CHANGELOG.md).
 
-## FAQ ❓
+## 15. FAQ ❓
 
 <details>
 <summary><b>What is an MCP server?</b></summary>
@@ -923,9 +972,11 @@ account to create and no telemetry. Your token sits in your client's config.
 <details>
 <summary><b>Can it post without me asking?</b></summary>
 
-It posts when you ask it to. Publishing and deleting require the model to pass
-`confirm: true`, which it sets after reading a description explaining what
-cannot be undone. Hiding a reply is not guarded, because it is one click to undo.
+It posts when you ask it to. Publishing, replying, reposting and deleting wait
+for your approval: Claude Code shows its own prompt for each one, and a client
+that can show forms asks with one. Where a client can do neither, the model's
+`confirm: true` counts, which is a speed bump against a careless call rather
+than a lock. Hiding a reply is not guarded, because it is one click to undo.
 
 Setting `THREADS_READ_ONLY=1` removes every write tool from the list, so the
 model cannot see or call them.
@@ -1006,7 +1057,8 @@ If this is useful, star the repo and come say hi on [X](https://x.com/thenavidm)
 
 | Library | License | What it does |
 |---|---|---|
-| [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | MIT | The MCP server and transports |
+| [Slipway](https://github.com/thenavidm/slipway) | Apache-2.0 | The MCP server and the CLI from one definition of each tool, with the write guard |
+| [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | Apache-2.0 | The MCP protocol and transports, through Slipway |
 | [zod](https://github.com/colinhacks/zod) | MIT | Tool argument schemas and validation |
 
 ## License

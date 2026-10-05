@@ -1,170 +1,155 @@
 /**
- * The CLI adapter.
+ * The two surfaces, now that Slipway builds both from ALL_TOOLS.
  *
- * What matters here is that the shell surface is derived from the tool specs
- * rather than described a second time, so the tests that count are the ones
- * asserting parity with ALL_TOOLS and the ones covering the argv shapes a
- * person actually types.
+ * Parsing, help and the exit-code contract are Slipway's and tested there. What
+ * matters here: every tool arrives on both surfaces intact, the guard behaves as
+ * the README promises, Meta's errors keep sensible exit codes even though Meta
+ * sends almost all of them as HTTP 400, login and refresh stay reachable, and
+ * the docs stay in step with the code.
  */
 
-import { readFileSync, existsSync } from "node:fs";
-import { describe, expect, it } from "vitest";
-import { z } from "zod";
-import { flagsFor, parseArgs, isCliCommand } from "../src/cli.js";
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { EXIT, toSlipwayError } from "@thenavidm/slipway";
+import { checkApp, cli, connect } from "@thenavidm/slipway/testing";
+import {
+  AuthenticationError,
+  ContainerError,
+  NotFoundError,
+  PermissionError,
+  RateLimitError,
+  ServerError,
+  TextTooLongError,
+  ThreadsError,
+  TimeoutError,
+  ValidationError,
+  WriteBlockedError,
+} from "../src/api/errors.js";
+import { app } from "../src/app.js";
 import { ALL_TOOLS } from "../src/tools/index.js";
+import { toSlipway } from "../src/tools/kit.js";
 
-describe("flagsFor", () => {
-  it("derives a flag per schema key, kebab-cased", () => {
-    const flags = flagsFor({ reply_to: z.string().optional() });
-    expect(flags[0]).toMatchObject({ key: "reply_to", flag: "--reply-to", kind: "string" });
+const env = {};
+
+// Nothing here may touch a real token store.
+afterEach(() => vi.unstubAllEnvs());
+const emptyStore = () => vi.stubEnv("THREADS_TOKEN_STORE", join(mkdtempSync(join(tmpdir(), "threads-store-")), "tokens.json"));
+
+describe("Threads on Slipway", () => {
+  it("offers every tool as a command and over MCP, under the same names", async () => {
+    const list = await cli(app, [], { env });
+    for (const tool of ALL_TOOLS) expect(list.stdout).toContain(tool.command);
+
+    const mcp = await connect(app, { env });
+    const names = (await mcp.listTools()).map((tool) => tool.name).sort();
+    await mcp.close();
+    expect(names).toEqual(ALL_TOOLS.map((tool) => tool.name).sort());
   });
 
-  it("reads required from the absence of .optional()", () => {
-    const flags = flagsFor({ text: z.string(), account: z.string().optional() });
-    expect(flags.find((f) => f.key === "text")?.required).toBe(true);
-    expect(flags.find((f) => f.key === "account")?.required).toBe(false);
+  it("refuses to post without --confirm, before anything reaches the network", async () => {
+    const run = await cli(app, ["create-post", "--text", "hello"], { env });
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stderr).code).toBe("refused");
+    expect(run.stderr).toContain("--confirm");
   });
 
-  it("carries .describe() through as help", () => {
-    const flags = flagsFor({ text: z.string().describe("The post body.") });
-    expect(flags[0]?.help).toBe("The post body.");
+  it("hides every write when THREADS_READ_ONLY is set", async () => {
+    const mcp = await connect(app, { env: { THREADS_READ_ONLY: "1" } });
+    const tools = await mcp.listTools();
+    await mcp.close();
+    expect(tools.length).toBeGreaterThan(0);
+    expect(tools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true);
   });
 
-  it("finds the description whichever side of .optional() it was chained", () => {
-    const outer = flagsFor({ a: z.string().optional().describe("outer") });
-    const inner = flagsFor({ b: z.string().describe("inner").optional() });
-    expect(outer[0]?.help).toBe("outer");
-    expect(inner[0]?.help).toBe("inner");
+  it("reports a missing argument by its flag and exits 2", async () => {
+    const run = await cli(app, ["get-post"], { env });
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stderr).error).toContain("--id");
   });
 
-  it("exposes an enum's values as choices", () => {
-    const flags = flagsFor({ reply_control: z.enum(["everyone", "accounts_you_follow"]).optional() });
-    expect(flags[0]).toMatchObject({ kind: "enum", choices: ["everyone", "accounts_you_follow"] });
+  it("calls a run with no profile connected not configured, exit 10", async () => {
+    emptyStore();
+    const run = await cli(app, ["whoami"], { env: {} });
+    expect(run.code).toBe(EXIT.notConfigured);
   });
 
-  it("marks a scalar array repeatable and an object array json", () => {
-    const flags = flagsFor({
-      texts: z.array(z.string()).optional(),
-      items: z.array(z.object({ image_url: z.string() })).optional(),
-    });
-    expect(flags.find((f) => f.key === "texts")).toMatchObject({ kind: "string", repeatable: true });
-    expect(flags.find((f) => f.key === "items")).toMatchObject({ kind: "json", repeatable: true });
-  });
-});
-
-describe("parseArgs", () => {
-  const flags = flagsFor({
-    text: z.string(),
-    limit: z.number().optional(),
-    confirm: z.boolean().optional(),
-    texts: z.array(z.string()).optional(),
-    link: z.object({ uri: z.string() }).optional(),
-    reply_control: z.enum(["everyone", "accounts_you_follow"]).optional(),
+  it("keeps login and refresh reachable from the CLI", async () => {
+    const help = (await cli(app, ["--help"], { env })).stdout;
+    expect(help).toContain("threads-cli login [--manual] [--all-scopes] [--port N]");
+    expect(help).toContain("threads-cli refresh");
+    expect((await cli(app, ["login", "--help"], { env })).stdout).toContain("Usage: threads-cli login");
+    emptyStore();
+    expect((await cli(app, ["refresh"], { env: {} })).code).toBe(EXIT.notConfigured);
   });
 
-  it("accepts --flag value and --flag=value alike", () => {
-    expect(parseArgs(["--text", "hi"], flags)).toEqual({ text: "hi" });
-    expect(parseArgs(["--text=hi"], flags)).toEqual({ text: "hi" });
-  });
-
-  it("accepts the underscore spelling of a flag", () => {
-    expect(parseArgs(["--reply_control", "everyone"], flags)).toEqual({ reply_control: "everyone" });
-  });
-
-  it("treats a boolean as a bare switch", () => {
-    expect(parseArgs(["--text", "hi", "--confirm"], flags)).toEqual({ text: "hi", confirm: true });
-    expect(parseArgs(["--confirm=false"], flags)).toEqual({ confirm: false });
-  });
-
-  it("coerces numbers, and refuses ones that are not", () => {
-    expect(parseArgs(["--limit", "25"], flags)).toEqual({ limit: 25 });
-    expect(() => parseArgs(["--limit", "many"], flags)).toThrow(/expects a number/);
-  });
-
-  it("parses a json flag, and refuses malformed json", () => {
-    expect(parseArgs(['--link={"uri":"https://x.com"}'], flags)).toEqual({
-      link: { uri: "https://x.com" },
-    });
-    expect(() => parseArgs(["--link", "{oops"], flags)).toThrow(/expects JSON/);
-  });
-
-  it("collects a repeatable flag into an array", () => {
-    expect(parseArgs(["--texts", "one", "--texts", "two"], flags)).toEqual({ texts: ["one", "two"] });
-  });
-
-  it("checks an enum against its choices", () => {
-    expect(() => parseArgs(["--reply-control", "friends"], flags)).toThrow(/expects one of/);
-  });
-
-  it("fills the first required flag from a bare argument", () => {
-    expect(parseArgs(["hello"], flags)).toEqual({ text: "hello" });
-  });
-
-  it("wraps a bare argument when the required flag is repeatable", () => {
-    const repeatable = flagsFor({ texts: z.array(z.string()) });
-    expect(parseArgs(["hello"], repeatable)).toEqual({ texts: ["hello"] });
-  });
-
-  it("refuses an unknown option rather than dropping it", () => {
-    expect(() => parseArgs(["--nope", "x"], flags)).toThrow(/Unknown option/);
-  });
-
-  it("refuses a second bare argument", () => {
-    expect(() => parseArgs(["one", "two"], flags)).toThrow(/Unexpected argument/);
+  it("passes slipway check", async () => {
+    const report = await checkApp(app, { env });
+    expect(report.findings.filter((finding) => finding.level === "error")).toEqual([]);
   });
 });
 
-describe("parity with the MCP surface", () => {
-  it("routes every tool name, in both spellings", () => {
-    for (const tool of ALL_TOOLS) {
-      expect(isCliCommand([tool.name])).toBe(true);
-      expect(isCliCommand([tool.name.replace(/_/g, "-")])).toBe(true);
-    }
+describe("Meta's errors keep sensible exit codes", () => {
+  const at = "/me/threads";
+  it.each([
+    ["an expired token", new AuthenticationError("Token expired.", 400, at, { code: 190, subcode: 463 }), EXIT.auth],
+    ["a missing permission", new PermissionError("Missing threads_content_publish.", 400, at, { code: 10 }), EXIT.auth],
+    ["bad arguments", new ValidationError("Media URL unreachable.", 400, at, { code: 100 }), EXIT.usage],
+    ["a post that is gone", new NotFoundError("Not found.", 404, at), EXIT.notFound],
+    ["a spent quota", new RateLimitError("Posting quota used up.", 400, at, { code: 4 }), EXIT.rateLimited],
+    ["a server failure", new ServerError("Internal error.", 500, at), EXIT.api],
+    ["our own deadline", new TimeoutError("No answer in 30 s.", 0, at), EXIT.api],
+    ["a container that never finished", new ContainerError("Container expired.", 0, at), EXIT.api],
+    ["no answer at all", new ThreadsError("fetch failed", 0, at), EXIT.api],
+    ["a write the server blocks", new WriteBlockedError("Writes are off."), EXIT.usage],
+    ["a post over the limit", new TextTooLongError("Post is 612 characters."), EXIT.usage],
+  ])("maps %s", (_label, error, code) => {
+    expect(toSlipwayError(toSlipway(error)).exitCode).toBe(code);
   });
 
-  it("builds flags for every tool without throwing", () => {
-    for (const tool of ALL_TOOLS) {
-      expect(() => flagsFor(tool.schema)).not.toThrow();
-    }
-  });
-
-  it("gives every schema key a flag", () => {
-    for (const tool of ALL_TOOLS) {
-      expect(flagsFor(tool.schema)).toHaveLength(Object.keys(tool.schema).length);
-    }
-  });
-
-  it("leaves the server's own flags and subcommands alone", () => {
-    expect(isCliCommand(["--http"])).toBe(false);
-    expect(isCliCommand(["--version"])).toBe(false);
-    expect(isCliCommand([])).toBe(false);
-    // login, doctor and refresh belong to the entry point, not to ALL_TOOLS.
-    expect(isCliCommand(["login"])).toBe(false);
-    expect(isCliCommand(["doctor"])).toBe(false);
-    expect(isCliCommand(["refresh"])).toBe(false);
+  /**
+   * 190/463 (expired, a refresh fixes it) and 190/467 (invalidated, it does
+   * not) differ only in the subcode, so the model needs it in the error.
+   */
+  it("keeps Meta's code, subcode and trace id in the error a client receives", () => {
+    const error = new AuthenticationError("Token expired.", 400, at, { code: 190, subcode: 463, type: "OAuthException", traceId: "AbC123" });
+    expect(toSlipway(error).toJSON()).toMatchObject({
+      code: "auth",
+      status: 400,
+      details: { endpoint: at, meta_code: 190, meta_subcode: 463, meta_type: "OAuthException", trace_id: "AbC123" },
+    });
   });
 });
 
 describe("documentation stays in step with the code", () => {
   const read = (p: string): string => readFileSync(new URL(p, import.meta.url), "utf-8");
   const names = (text: string): Set<string> => new Set(text.match(/THREADS_[A-Z_]+/g) ?? []);
+  const source = (dir: string): string =>
+    readdirSync(new URL(dir, import.meta.url), { withFileTypes: true })
+      .map((entry) => (entry.isDirectory() ? source(`${dir}${entry.name}/`) : entry.name.endsWith(".ts") ? read(`${dir}${entry.name}`) : ""))
+      .join("\n");
+
+  /** Every variable the server reads: this repo's code, and Slipway's as agent-context lists them. */
+  const used = async (): Promise<Set<string>> => {
+    const context = JSON.parse((await cli(app, ["agent-context"], { env })).stdout);
+    return new Set([...names(source("../src/")), ...context.settings.map((setting: { env: string }) => setting.env)]);
+  };
 
   /**
    * Two variables shipped undocumented and five never reached `--help`, which is
    * the kind of drift nobody notices because both sides look complete on their own.
    */
-  it("documents every environment variable the code reads", () => {
-    const used = names(["config.ts", "transport/http.ts"].map((f) => read(`../src/${f}`)).join("\n"));
+  it("documents every environment variable the server reads", async () => {
     const documented = names(read("../README.md"));
-    expect([...used].filter((v) => !documented.has(v))).toEqual([]);
+    expect([...(await used())].filter((v) => !documented.has(v))).toEqual([]);
   });
 
-  it("lists every environment variable in --help", () => {
-    const used = names(["config.ts", "transport/http.ts"].map((f) => read(`../src/${f}`)).join("\n"));
-    const helped = names(read("../src/index.ts"));
+  it("lists every environment variable in --help", async () => {
+    const help = (await cli(app, ["--help"], { env })).stdout;
     // The help groups the three HTTP ones as `THREADS_HTTP_PORT / _HOST / _TOKEN`.
     const shorthand = new Set(["THREADS_HTTP_HOST", "THREADS_HTTP_TOKEN"]);
-    expect([...used].filter((v) => !helped.has(v) && !shorthand.has(v))).toEqual([]);
+    expect([...(await used())].filter((v) => !help.includes(v) && !shorthand.has(v))).toEqual([]);
   });
 
   /**

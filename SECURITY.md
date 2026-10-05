@@ -27,9 +27,15 @@ telemetry.
 
 Writes work by default, because posting is the point of the server.
 
-**`confirm: true`** on publishing and deleting, which are public the moment they
-run and cannot be undone from a chat window. Hiding a reply is not guarded,
-because it is one click to undo.
+**Approval** on publishing and deleting, which are public the moment they run
+and cannot be undone from a chat window. Over MCP a person approves each one
+where the client can ask, in Claude Code's own prompt or an approval form;
+elsewhere the model must pass `confirm: true`, and `THREADS_CONFIRM=model`
+allows that everywhere. Hiding a reply is not guarded, because it is one click
+to undo.
+
+**`THREADS_AUDIT_LOG=<path>`** records every attempted write, allowed and
+blocked alike, one line each, with who approved it.
 
 **`THREADS_READ_ONLY=1`** removes every write tool from the list. The tools are
 never registered, so a model cannot see or call them.
@@ -43,8 +49,9 @@ can post.
 
 ## Running it over HTTP
 
-The HTTP transport has no authentication of its own and belongs behind TLS and an
-authenticating proxy. It holds a live credential for your account.
+Over HTTP the server refuses to listen on any address but localhost without
+`THREADS_HTTP_TOKEN`, and then requires it as a bearer token. It still belongs
+behind TLS and a reverse proxy. It holds a live credential for your account.
 
 ## Good-faith research
 

@@ -1,59 +1,49 @@
 /**
- * Shared plumbing every tool uses.
+ * Shared plumbing every tool uses, now on Slipway.
  *
- * Registering thirty tools by hand is thirty chances to forget an annotation,
- * leak a stack trace, or return a shape the model cannot read. This wraps all
- * of it once so a tool module only describes what it actually does.
+ * Tool modules keep describing themselves with a Zod shape, a risk and a
+ * handler. This adapter turns each into a Slipway tool, so the MCP server, the
+ * CLI, the write guard, annotations and errors all come from the framework
+ * instead of a copy kept in this repo.
  */
 
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z, type ZodRawShape } from "zod";
+import {
+  ApiError,
+  AuthError,
+  NotFoundError as SlipwayNotFound,
+  RateLimitError as SlipwayRateLimit,
+  RefusedError,
+  TimeoutError as SlipwayTimeout,
+  toolkit,
+  UsageError,
+  z,
+  type Risk,
+  type SlipwayError,
+  type Tool,
+} from "@thenavidm/slipway";
 import type { ThreadsClient } from "../api/client.js";
-import { ThreadsError } from "../api/errors.js";
+import {
+  AuthenticationError,
+  NotFoundError,
+  PermissionError,
+  RateLimitError,
+  TextTooLongError,
+  ThreadsError,
+  TimeoutError,
+  ValidationError,
+  WriteBlockedError,
+} from "../api/errors.js";
 import type { Account, Config } from "../config.js";
 import { selectAccount } from "../config.js";
-import { annotationsFor, type Risk, type WriteGuard } from "../safety.js";
 
 export type ToolContext = {
   client: ThreadsClient;
   config: Config;
-  guard: WriteGuard;
   /** Resolve which profile this call acts as. */
   account: (hint?: string) => Account;
 };
 
-export type ToolResult = {
-  content: { type: "text"; text: string }[];
-  isError?: boolean;
-};
-
-/**
- * A tool returns either a pre-rendered string or a value to serialise.
- *
- * The reading tools return the tagged format from `format/posts.ts`, which is
- * already text. The writing tools return a small object, an id and a permalink,
- * where JSON is clearer than tags. Both go through here so neither has to think
- * about the MCP content envelope.
- */
-export function ok(data: unknown): ToolResult {
-  const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
-  return { content: [{ type: "text", text }] };
-}
-
-/**
- * Errors come back as a normal result with `isError`, not a thrown exception.
- *
- * A thrown MCP error reaches the model as a protocol failure with no structure.
- * A result it can read tells it what went wrong and usually how to fix it,
- * which is the difference between a correct retry and a give-up.
- */
-export function fail(error: unknown): ToolResult {
-  const payload =
-    error instanceof ThreadsError
-      ? error.toJSON()
-      : { error: (error as Error)?.message ?? String(error) };
-  return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }], isError: true };
-}
+const kit = toolkit<ToolContext>();
 
 /** The optional argument that picks a profile, on every account-scoped tool. */
 export const accountArg = {
@@ -65,32 +55,26 @@ export const accountArg = {
     ),
 };
 
-/** The confirmation argument required by every public or irreversible tool. */
+/**
+ * Kept so tool modules read the same, but never sent: Slipway adds `confirm`
+ * to every irreversible tool itself, with one description everywhere.
+ */
 export const confirmArg = {
-  confirm: z
-    .boolean()
-    .optional()
-    .describe(
-      "Must be true for this to run. The result is public immediately or cannot be undone, so it is refused without an explicit confirmation. Threads has no edit endpoint and no unsend.",
-    ),
+  confirm: z.boolean().optional(),
 };
 
 /** Cursor and limit, on every paginating tool. */
 export const pageArgs = {
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(100)
-    .optional()
-    .describe("How many to return, 1-100."),
+  limit: z.number().int().min(1).max(100).optional().describe("How many to return, 1-100."),
   cursor: z
     .string()
     .optional()
     .describe("Continue from a previous page. Pass the `cursor` attribute from the last result."),
 };
 
-export type ToolSpec<S extends ZodRawShape> = {
+type Shape = Record<string, z.ZodType>;
+
+export type ToolSpec<S extends Shape> = {
   name: string;
   /** One line, imperative. Shown in tool pickers. */
   title: string;
@@ -104,68 +88,60 @@ export type ToolSpec<S extends ZodRawShape> = {
   summary?: (args: z.infer<z.ZodObject<S>>) => string;
 };
 
-export function defineTool<S extends ZodRawShape>(spec: ToolSpec<S>): ToolSpec<S> {
-  return spec;
-}
+export type AnyToolSpec = Tool<ToolContext>;
 
 /**
- * A tool of any shape, for the one place tools are held together in a list.
- *
- * `ToolSpec` is generic over its schema, so a list of tools with different
- * schemas has no single type: each handler takes a different argument shape and
- * function parameters are contravariant. The type safety that matters lives
- * inside each `defineTool` call, where schema and handler are checked against
- * each other. This only loosens the seam where they are collected.
+ * Meta answers almost every failure with HTTP 400, an expired token and a
+ * spent quota included, and puts what happened in `code` and `error_subcode`.
+ * `api/errors.ts` already sorts them into classes, so the exit code and error
+ * code follow the class, not the status, and Meta's own fields ride along in
+ * `details` for the model to read.
  */
-export type AnyToolSpec = Omit<ToolSpec<ZodRawShape>, "handler" | "summary"> & {
-  handler: (args: never, ctx: ToolContext) => Promise<unknown>;
-  summary?: (args: never) => string;
-};
-
-/** Register one tool against the server, with guarding and error handling applied. */
-export function register(
-  server: McpServer,
-  contextFor: (extra: unknown) => ToolContext,
-  spec: AnyToolSpec,
-): void {
-  server.registerTool(
-    spec.name,
-    {
-      title: spec.title,
-      description: spec.description,
-      inputSchema: spec.schema,
-      annotations: {
-        title: spec.title,
-        ...annotationsFor(spec.risk, { idempotent: spec.idempotent }),
-      },
-    },
-    // The SDK derives its callback type from the schema generic. This wrapper is
-    // generic over the same shape, but TypeScript cannot prove the two are equal
-    // through the indirection, so the cast lives at this single boundary rather
-    // than in every tool definition.
-    (async (args: Record<string, unknown>, extra: unknown) => {
-      try {
-        const ctx = contextFor(extra);
-        if (spec.risk !== "read") {
-          const summary = spec.summary?.(args as never) ?? spec.name;
-          const confirm = (args as { confirm?: boolean }).confirm;
-          ctx.guard.check(spec.name, spec.risk, confirm, summary);
-        }
-        return ok(await spec.handler(args as never, ctx));
-      } catch (error) {
-        return fail(error);
-      }
-    }) as never,
+export function toSlipway(error: ThreadsError): SlipwayError {
+  const details = Object.fromEntries(
+    Object.entries({
+      endpoint: error.endpoint,
+      meta_code: error.code || undefined,
+      meta_subcode: error.subcode || undefined,
+      meta_type: error.type || undefined,
+      detail: error.detail || undefined,
+      trace_id: error.traceId || undefined,
+    }).filter(([, value]) => value !== undefined),
   );
+  const options = { ...(error.status ? { status: error.status } : {}), details, cause: error };
+  if (error instanceof AuthenticationError || error instanceof PermissionError) return new AuthError(error.message, options);
+  if (error instanceof NotFoundError) return new SlipwayNotFound(error.message, options);
+  if (error instanceof RateLimitError) return new SlipwayRateLimit(error.message, options);
+  if (error instanceof ValidationError || error instanceof TextTooLongError) return new UsageError(error.message, options);
+  if (error instanceof WriteBlockedError) return new RefusedError(error.message, options);
+  if (error instanceof TimeoutError) return new SlipwayTimeout(error.message, options);
+  // A server error, a container that never finished processing, or no answer at all: the service's failure, worth a retry.
+  return new ApiError(error.message, options);
 }
 
-export function makeContext(client: ThreadsClient, config: Config, guard: WriteGuard): ToolContext {
-  return {
-    client,
-    config,
-    guard,
-    account: (hint?: string) => selectAccount(config, hint),
-  };
+export function defineTool<S extends Shape>(spec: ToolSpec<S>): Tool<ToolContext> {
+  const { confirm: _confirm, ...shape } = spec.schema as Shape;
+  const handler = spec.handler as (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
+  return kit.defineTool({
+    name: spec.name,
+    title: spec.title,
+    description: spec.description,
+    input: z.object(shape),
+    risk: spec.risk,
+    ...(spec.idempotent !== undefined ? { idempotent: spec.idempotent } : {}),
+    ...(spec.summary ? { summary: spec.summary as (args: Record<string, unknown>) => string } : {}),
+    handler: async (args, ctx) => {
+      try {
+        return await handler(args, ctx);
+      } catch (error) {
+        throw error instanceof ThreadsError ? toSlipway(error) : error;
+      }
+    },
+  });
+}
+
+export function makeContext(client: ThreadsClient, config: Config): ToolContext {
+  return { client, config, account: (hint?: string) => selectAccount(config, hint) };
 }
 
 /** Clamp a caller-supplied limit into a range Threads will accept. */

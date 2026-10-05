@@ -14,7 +14,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node: [20, 22]
+        node: [22, 24]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -46,10 +46,11 @@ jobs:
         env:
           THREADS_ACCESS_TOKEN: ci-placeholder
           THREADS_TOKEN_STORE: /dev/null
+        # Stdin stays open while the request is answered: the MCP stdio binding stops a server whose input has ended.
         run: |
-          printf '%s\n%s\n' \
+          (printf '%s\n%s\n' \
             '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
-            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'; sleep 5) \
             | node dist/index.js 2>/dev/null \
             | node -e '
               let raw = "";
@@ -79,10 +80,11 @@ jobs:
           THREADS_ACCESS_TOKEN: ci-placeholder
           THREADS_TOKEN_STORE: /dev/null
           THREADS_READ_ONLY: "1"
+        # Stdin stays open while the request is answered: the MCP stdio binding stops a server whose input has ended.
         run: |
-          printf '%s\n%s\n' \
+          (printf '%s\n%s\n' \
             '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
-            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'; sleep 5) \
             | node dist/index.js 2>/dev/null \
             | node -e '
               let raw = "";
@@ -102,10 +104,11 @@ jobs:
         env:
           THREADS_ACCESS_TOKEN: ci-placeholder
           THREADS_TOKEN_STORE: /dev/null
+        # Stdin stays open while the request is answered: the MCP stdio binding stops a server whose input has ended.
         run: |
-          printf '%s\n%s\n' \
+          (printf '%s\n%s\n' \
             '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
-            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"create_post","arguments":{"text":"ci"}}}' \
+            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"create_post","arguments":{"text":"ci"}}}'; sleep 5) \
             | node dist/index.js 2>/dev/null \
             | node -e '
               let raw = "";

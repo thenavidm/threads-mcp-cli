@@ -8,7 +8,7 @@ The whole thing takes about ten minutes once.
 
 ## Prerequisites
 
-Node 20 or newer, and a Threads profile.
+Node 22 or newer, and a Threads profile.
 
 ## 1. Create the Meta app
 

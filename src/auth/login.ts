@@ -171,7 +171,8 @@ export async function runLogin(argv: string[] = []): Promise<number> {
     out("       export THREADS_APP_SECRET=...");
     out("       threads-mcp login");
     out("");
-    return 1;
+    // Exit 10: nothing is configured yet, which the steps above fix.
+    return 10;
   }
 
   const redirectUri = `http://127.0.0.1:${options.port}/callback`;

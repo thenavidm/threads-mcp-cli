@@ -2,9 +2,29 @@
 
 | Component | Version | Last Updated |
 |-----------|---------|--------------|
-| threads-mcp-cli | 1.1.2 | 2026-10-04 |
+| threads-mcp-cli | 2.0.0 | 2026-10-05 |
+| @thenavidm/slipway | 0.1.7 | 2026-10-05 |
 
 ---
+
+## 2.0.0, 2026-10-05
+
+Built on [Slipway](https://github.com/thenavidm/slipway) 0.1.7. The 30 tools keep their names and arguments, and every difference below was measured against 1.1.2 before release.
+
+- **A person approves each post, reply, repost and delete over MCP.** Claude Code (2.1.246 and later) shows its own prompt for each one, and a client that can show forms asks with an approval form whose one box starts unticked. Approvals are signed, bound to the exact call and work once. Where a client can do neither, the model's `confirm: true` still counts, and `THREADS_CONFIRM=model` makes it enough everywhere, for an agent with no person to ask. The audit log records who approved each write.
+- **A smaller tool list.** 11,356 tokens in Claude Code with every tool loaded, down from 12,745: the per-tool `$schema` line, an `execution` field and `additionalProperties: false` are gone. The last one advertised strict input while unknown keys were dropped anyway; the schema now says what happens.
+- **Meta's errors keep their meaning.** Meta answers almost every failure with HTTP 400, an expired token included. The exit code now follows the error's class: an expired token or a missing permission exits 4, rejected arguments 2, a spent quota 7, and Meta's code, subcode and trace id reach the model in the error's `details`. 1.1.2 matched words in the message, so rejected arguments exited 5, which a script would retry.
+- **Exit codes follow the house contract everywhere.** An unknown command and a write in read-only mode exit 2 instead of 1; `doctor`, `login` and `refresh` with nothing to work with exit 10 instead of 1; a refused refresh exits 4. 1 now means an unexpected error, and a Graph API that cannot be reached still exits 5.
+- **Cheaper to find a command through the CLI.** `which <words>` finds one without the full list. In Codex, finding the command that publishes a staged post took 84,035 input tokens against 84,054 (median of five), in three commands either way, and over MCP the same task read the same.
+- **`install <client>`** adds the server to Claude Code, Codex, Claude Desktop, Cursor, VS Code or Gemini CLI in each one's own format, naming only the settings that connect a profile.
+- **Less work to start.** The entry turns on Node's compile cache, and the server spends 175 ms of CPU before its first answer where 1.1.2 spent 210 (median of 21 runs, taking turns on one busy Mac). npx installs 4 dependencies instead of 94.
+- **`doctor` asks Meta every time, as before, and stops failing a profile for something it cannot change.** Geo-gating is switched on by Meta per profile and nothing can request it, so a profile without it is a warning, not a failure.
+- **`--help` lists every setting the server reads**, Slipway's own included, `login [--manual] [--all-scopes] [--port N]` and `refresh` show what they take, and restored tests keep the README and `--help` in step with the code.
+- **README fixes.** The exit-code example script no longer reads the status of `!`, `/health` is described as it answers, the release workflow attaches the desktop extension the README sends people to, the desktop manifest names all nine tools that need approval, and images load from cdn.navid.me. THIRD_PARTY_NOTICES.md lists the production dependencies' licenses.
+
+### Upgrading
+
+Node 22 or newer. Scripts keep working for success, usage errors and missing setup; a script that treated exit 1 as "unknown command" or "read-only" should read 2, and one that retried a 5 on rejected arguments now gets 2. Over MCP, expect an approval prompt or form for each post; a headless agent that should post with `confirm: true` alone needs `THREADS_CONFIRM=model`. A script that pipes JSON-RPC into the server must keep stdin open until it reads the answer: the server now stops when its input ends, as the MCP stdio binding asks. Over HTTP, `GET /health` returns the name, version and tool count, and no longer tells anyone who can reach it how many profiles are connected or how long their tokens last; `doctor` and the `threads://accounts` resource still do. `--http --port` with something that is not a port number stops with exit 2 instead of using the default. Two terminal screens grew: the general help by 83 tokens, for `which`, `install`, the flags, the exit codes and the safety settings it now lists, and the command list by 23, for the lines that point to `which` and `--help`. `SKILL.md` is 68 tokens longer in Claude Code, for the approval rule, `which` and the full exit codes.
 
 ## 1.1.2, 2026-10-04
 
