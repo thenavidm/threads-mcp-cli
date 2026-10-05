@@ -1,6 +1,6 @@
 {
   "name": "@thenavidm/threads-mcp-cli",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Threads MCP server and CLI for Claude Code and AI agents. 30 tools for posting, chained threads, carousels, replies and reply approvals, insights, keyword search and profile discovery.",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,7 +23,7 @@
     "build:mcpb": "bash desktop-extension/build.sh"
   },
   "dependencies": {
-    "@thenavidm/slipway": "^0.1.7",
+    "@thenavidm/slipway": "^0.1.17",
     "zod": "^4.2.0"
   },
   "devDependencies": {

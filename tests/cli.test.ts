@@ -145,11 +145,13 @@ describe("documentation stays in step with the code", () => {
     expect([...(await used())].filter((v) => !documented.has(v))).toEqual([]);
   });
 
-  it("lists every environment variable in --help", async () => {
+  // Since Slipway 0.1.15 the help names the settings that connect an account and the safety
+  // switches, and counts the rest, which agent-context describes one by one.
+  it("names every environment variable in --help or agent-context", async () => {
     const help = (await cli(app, ["--help"], { env })).stdout;
-    // The help groups the three HTTP ones as `THREADS_HTTP_PORT / _HOST / _TOKEN`.
-    const shorthand = new Set(["THREADS_HTTP_HOST", "THREADS_HTTP_TOKEN"]);
-    expect([...(await used())].filter((v) => !help.includes(v) && !shorthand.has(v))).toEqual([]);
+    const context = JSON.parse((await cli(app, ["agent-context"], { env })).stdout);
+    const described = new Set(context.settings.map((setting: { env: string }) => setting.env));
+    expect([...(await used())].filter((v) => !help.includes(v) && !described.has(v))).toEqual([]);
   });
 
   /**

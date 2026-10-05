@@ -900,6 +900,7 @@ Server not appearing at all: run the command your client runs, by hand, and read
 | `THREADS_HTTP_PORT` | `8787` | For `--http` |
 | `THREADS_HTTP_HOST` | `127.0.0.1` | For `--http` |
 | `THREADS_HTTP_TOKEN` | none | Bearer token required by `--http`; any address but localhost refuses to start without one |
+| `THREADS_HTTP_ALLOWED_ORIGINS` | none | Comma-separated browser origins allowed to connect to `--http`; a page from any other site is refused |
 | `THREADS_SURFACE` | `full` | `search` lists three tools that find, describe and run the rest |
 | `THREADS_TOOL_TIMEOUT_MS` | none | Give up on any tool after this long |
 | `THREADS_DEBUG` | `0` | `1` prints debug lines on stderr |
