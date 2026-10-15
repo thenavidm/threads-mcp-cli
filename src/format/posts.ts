@@ -73,6 +73,16 @@ function renderMedia(post: Any, depth: number): string {
   return `${pad(depth)}<media${attr("type", type.toLowerCase())}${attr("url", url)}${attr("alt", post.alt_text)} />\n`;
 }
 
+/** A text attachment: the long text under a post, reproduced exactly like the post's own. */
+function renderAttachment(post: Any, depth: number): string {
+  const attachment = post.text_attachment as Any;
+  if (!attachment || typeof attachment.plaintext !== "string") return "";
+  return (
+    `${pad(depth)}<attachment${attr("link", attachment.link_attachment_url)}>\n` +
+    `${escapeXml(attachment.plaintext)}\n${pad(depth)}</attachment>\n`
+  );
+}
+
 /** Engagement, when insights were joined onto the post. */
 function renderEngagement(post: Any, depth: number): string {
   const metrics = post.__insights as Record<string, number> | undefined;
@@ -111,6 +121,7 @@ export function renderPost(post: Any, depth = 1, tag = "post"): string {
   }
 
   body += renderMedia(post, depth + 1);
+  body += renderAttachment(post, depth + 1);
   body += renderEngagement(post, depth + 1);
 
   if (post.quoted_post) body += renderPost(post.quoted_post, depth + 1, "quoted_post");

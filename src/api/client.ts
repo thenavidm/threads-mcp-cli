@@ -72,7 +72,15 @@ export const POST_FIELDS = [
   "link_attachment_url",
   "topic_tag",
   "alt_text",
+  "text_attachment",
 ].join(",");
+
+/**
+ * What a reply replies to. Meta documents these on replies, not in the post
+ * field list, so they are asked for apart from POST_FIELDS: a field a post
+ * does not carry must never take the whole read down with it.
+ */
+export const REPLY_LINK_FIELDS = "is_reply,replied_to,root_post";
 
 /** Fields on a reply. `hide_status` and `replied_to` are the ones that matter. */
 export const REPLY_FIELDS = [

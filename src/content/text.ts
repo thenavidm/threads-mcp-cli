@@ -36,6 +36,9 @@ export const MAX_POST_BYTES = 500;
 /** Threads' limit on a topic tag. */
 export const MAX_TOPIC_TAG_CHARS = 50;
 
+/** A text attachment's limit, in characters, from Meta's Text Attachments page. */
+export const MAX_ATTACHMENT_CHARS = 10_000;
+
 /** Threads accepts at most this many distinct URLs in one post's text. */
 export const MAX_LINKS_PER_POST = 5;
 

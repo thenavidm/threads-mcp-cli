@@ -31,7 +31,7 @@ import type { ThreadsClient } from "../api/client.js";
 import { POST_FIELDS } from "../api/client.js";
 import type { Account } from "../config.js";
 import { checkMedia, mediaTypeFor, type MediaItem } from "./media.js";
-import { countLinks, MAX_LINKS_PER_POST, normalizeTopicTag, overLimitMessage } from "./text.js";
+import { countLinks, graphemeLength, MAX_ATTACHMENT_CHARS, MAX_LINKS_PER_POST, normalizeTopicTag, overLimitMessage } from "./text.js";
 import { TextTooLongError } from "../api/errors.js";
 
 export type ReplyControl =
@@ -47,6 +47,8 @@ export type ContainerOptions = MediaItem & {
   quote_post_id?: string;
   reply_control?: ReplyControl;
   link_attachment?: string;
+  /** Long writing under a text-only post: up to 10,000 characters and one link. */
+  text_attachment?: TextAttachment;
   topic_tag?: string;
   allowlisted_country_codes?: string[];
   enable_reply_approvals?: boolean;
@@ -55,6 +57,8 @@ export type ContainerOptions = MediaItem & {
   children?: string[];
   media_type?: "TEXT" | "IMAGE" | "VIDEO" | "CAROUSEL";
 };
+
+export type TextAttachment = { plaintext: string; link_attachment_url?: string };
 
 export type PublishedPost = {
   id: string;
@@ -104,6 +108,8 @@ export function validate(options: ContainerOptions, label = "This post"): string
     }
   }
 
+  if (options.text_attachment) warnings.push(...checkAttachment(options));
+
   if (options.topic_tag) normalizeTopicTag(options.topic_tag);
 
   if (options.allowlisted_country_codes?.length) {
@@ -122,6 +128,43 @@ export function validate(options: ContainerOptions, label = "This post"): string
   return warnings;
 }
 
+/**
+ * A text attachment's own rules, from Meta's Text Attachments page: only on a
+ * text-only post, at most 10,000 characters, and no link inside it when the post
+ * already carries a link card. Its link counts toward the post's 5.
+ */
+function checkAttachment(options: ContainerOptions): string[] {
+  const attachment = options.text_attachment as TextAttachment;
+  const plain = typeof attachment.plaintext === "string" ? attachment.plaintext : "";
+  if (!plain.trim()) throw new Error("A text attachment needs its text, in plaintext.");
+  const length = graphemeLength(plain);
+  if (length > MAX_ATTACHMENT_CHARS) {
+    throw new TextTooLongError(
+      `The text attachment is ${length} characters. Threads allows ${MAX_ATTACHMENT_CHARS}. Trim ${length - MAX_ATTACHMENT_CHARS}.`,
+    );
+  }
+  if (options.image_url || options.video_url || options.children?.length) {
+    throw new Error("A text attachment goes only on a text-only post. Drop the media, or post the long text on its own.");
+  }
+  const link = attachment.link_attachment_url;
+  if (!link) return [];
+  if (options.link_attachment) {
+    throw new Error(
+      "This post already has a link card, and Threads refuses a link inside its text attachment as well. Keep one of the two.",
+    );
+  }
+  try {
+    const url = new URL(link);
+    if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("not http");
+  } catch {
+    throw new Error(`The text attachment's link "${link}" is not a valid URL.`);
+  }
+  const links = countLinks(`${options.text ?? ""} ${link}`);
+  return links > MAX_LINKS_PER_POST
+    ? [`With the attachment's link, this post holds ${links} distinct URLs. Threads accepts at most ${MAX_LINKS_PER_POST} and refuses the post.`]
+    : [];
+}
+
 /** Build the parameter map Meta expects, dropping anything unset. */
 export function containerParams(options: ContainerOptions): Record<string, unknown> {
   const mediaType = options.media_type ?? mediaTypeFor(options);
@@ -135,6 +178,15 @@ export function containerParams(options: ContainerOptions): Record<string, unkno
     quote_post_id: options.quote_post_id,
     reply_control: options.reply_control,
     link_attachment: options.link_attachment,
+    // Sent as the JSON object Meta's example shows, with only the fields set.
+    text_attachment: options.text_attachment
+      ? JSON.stringify({
+          plaintext: options.text_attachment.plaintext,
+          ...(options.text_attachment.link_attachment_url
+            ? { link_attachment_url: options.text_attachment.link_attachment_url }
+            : {}),
+        })
+      : undefined,
     topic_tag: options.topic_tag ? normalizeTopicTag(options.topic_tag) : undefined,
     allowlisted_country_codes: options.allowlisted_country_codes?.length
       ? options.allowlisted_country_codes.map((c) => c.trim().toUpperCase())

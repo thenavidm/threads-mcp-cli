@@ -27,13 +27,25 @@ import { requireMediaId } from "../api/identity.js";
 const POST_METRICS = ["views", "likes", "replies", "reposts", "quotes", "shares"] as const;
 const ACCOUNT_METRICS = ["views", "likes", "replies", "reposts", "quotes", "clicks", "followers_count"] as const;
 
-type Metric = { name?: string; period?: string; total_value?: { value?: number }; values?: Array<{ value?: number; end_time?: string }> };
+type Metric = {
+  name?: string;
+  period?: string;
+  total_value?: { value?: number };
+  values?: Array<{ value?: number; end_time?: string }>;
+  link_total_values?: Array<{ value?: number; link_url?: string }>;
+};
 
-/** Flatten Meta's three insight envelopes into one name-to-number map. */
+/** Flatten Meta's insight envelopes into one name-to-number map. */
 function flatten(rows: Metric[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const row of rows) {
     if (!row.name) continue;
+    if (Array.isArray(row.link_total_values)) {
+      // Link clicks come one row per URL. The total is their sum; clicksByLink
+      // keeps the split.
+      out[row.name] = row.link_total_values.reduce((sum, v) => sum + (typeof v.value === "number" ? v.value : 0), 0);
+      continue;
+    }
     if (typeof row.total_value?.value === "number") {
       out[row.name] = row.total_value.value;
       continue;
@@ -45,6 +57,15 @@ function flatten(rows: Metric[]): Record<string, number> {
     }
   }
   return out;
+}
+
+/** Link clicks by URL, from the one metric Meta reports per link. */
+function clicksByLink(rows: Metric[]): Array<{ url: string; clicks: number }> {
+  const row = rows.find((r) => Array.isArray(r.link_total_values));
+  return (row?.link_total_values ?? [])
+    .filter((v) => typeof v.value === "number")
+    .map((v) => ({ url: v.link_url ?? "unknown", clicks: v.value as number }))
+    .sort((a, b) => b.clicks - a.clicks);
 }
 
 export const getPostInsights = defineTool({
@@ -83,7 +104,7 @@ export const getAccountInsights = defineTool({
   name: "get_account_insights",
   title: "Metrics for the whole profile",
   description:
-    "Profile-level views, likes, replies, reposts, quotes, link clicks and follower count. Data starts on 13 April 2024 and is not reliable before 1 June 2024; earlier windows return nothing.",
+    "Profile-level views, likes, replies, reposts, quotes, link clicks (with the split by link) and follower count. Without since and until, Meta answers for yesterday through today only. Data starts on 13 April 2024 and is not reliable before 1 June 2024; earlier windows return nothing.",
   schema: {
     since: z.string().optional().describe("ISO date or Unix timestamp. Nothing before 2024-04-13 is available."),
     until: z.string().optional().describe("ISO date or Unix timestamp."),
@@ -107,12 +128,15 @@ export const getAccountInsights = defineTool({
     const hasWindow = Boolean(args.since || args.until);
 
     const results: Record<string, number> = {};
+    let byLink: Array<{ url: string; clicks: number }> = [];
 
     if (windowed.length) {
       const response = (await ctx.client.call(account, `/${userId}/threads_insights`, {
         params: { metric: windowed.join(","), since: args.since, until: args.until },
       })) as Record<string, unknown>;
-      Object.assign(results, flatten(dataOf(response) as Metric[]));
+      const rows = dataOf(response) as Metric[];
+      Object.assign(results, flatten(rows));
+      byLink = clicksByLink(rows);
     }
 
     if (wantsFollowers) {
@@ -124,8 +148,10 @@ export const getAccountInsights = defineTool({
 
     return {
       account: account.username ?? userId,
-      ...(hasWindow ? { since: args.since ?? null, until: args.until ?? null } : { window: "lifetime" }),
+      // With no range Meta answers for yesterday through today, not for the life of the profile.
+      ...(hasWindow ? { since: args.since ?? null, until: args.until ?? null } : { window: "yesterday through today, Meta's default" }),
       ...results,
+      ...(byLink.length ? { clicks_by_link: byLink } : {}),
       ...(wantsFollowers && hasWindow
         ? { note: "followers_count is a current total and ignores the date range." }
         : {}),
@@ -211,9 +237,12 @@ export const getTopPosts = defineTool({
             params: { metric: POST_METRICS.join(",") },
           })) as Record<string, unknown>;
           const metrics = flatten(dataOf(response) as Metric[]);
-          const views = metrics.views ?? 0;
-          const interactions =
-            (metrics.likes ?? 0) + (metrics.replies ?? 0) + (metrics.reposts ?? 0) + (metrics.quotes ?? 0);
+          // A number Meta did not return stays null. Writing 0 would make a post with
+          // no reported views look like one nobody saw.
+          const got = (name: string): number | null => (typeof metrics[name] === "number" ? metrics[name] : null);
+          const views = got("views");
+          const counts = ["likes", "replies", "reposts", "quotes"].map(got);
+          const complete = views !== null && views > 0 && counts.every((c) => c !== null);
           return {
             id: String(post.id),
             permalink: post.permalink as string | undefined,
@@ -221,11 +250,13 @@ export const getTopPosts = defineTool({
             excerpt: typeof post.text === "string" ? post.text.replace(/\s+/g, " ").slice(0, 120) : "",
             media_type: post.media_type as string | undefined,
             views,
-            likes: metrics.likes ?? 0,
-            replies: metrics.replies ?? 0,
-            reposts: metrics.reposts ?? 0,
-            quotes: metrics.quotes ?? 0,
-            engagement_rate: views > 0 ? Number(((interactions / views) * 100).toFixed(2)) : 0,
+            likes: counts[0],
+            replies: counts[1],
+            reposts: counts[2],
+            quotes: counts[3],
+            engagement_rate: complete
+              ? Number(((counts.reduce((sum, c) => (sum as number) + (c as number), 0) as number) / (views as number) * 100).toFixed(2))
+              : null,
           };
         } catch {
           return null;
@@ -234,18 +265,26 @@ export const getTopPosts = defineTool({
     );
 
     const rows = scored.filter((r): r is NonNullable<typeof r> => r !== null);
-    rows.sort((a, b) => (b[sortBy] as number) - (a[sortBy] as number));
+    // Posts missing the number being sorted by go last, in the order they came.
+    rows.sort((a, b) => {
+      const x = a[sortBy] as number | null;
+      const y = b[sortBy] as number | null;
+      if (x === null && y === null) return 0;
+      if (x === null) return 1;
+      if (y === null) return -1;
+      return y - x;
+    });
 
-    const withViews = rows.filter((r) => r.views > 0).length;
+    const missing = rows.filter((r) => r[sortBy] === null).length;
 
     return {
       sampled: posts.length,
       scored: rows.length,
       sorted_by: sortBy,
       posts: rows,
-      ...(sortBy === "engagement_rate" && withViews < rows.length
+      ...(missing
         ? {
-            note: `${rows.length - withViews} post(s) reported no views, so their engagement rate is 0 rather than unknown. Sort by likes to include them fairly.`,
+            note: `${missing} post(s) have no ${sortBy} from Meta, shown as null and listed last rather than counted as 0.`,
           }
         : {}),
     };

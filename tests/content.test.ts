@@ -123,3 +123,46 @@ describe("post references", () => {
     expect(() => requireMediaId("nonsense")).toThrow(/not a Threads post id/);
   });
 });
+
+describe("a text attachment", () => {
+  it("is sent as the JSON object Meta's example shows, with only the fields set", () => {
+    const params = containerParams({ text: "Short.", text_attachment: { plaintext: "The long part." } });
+    expect(params.media_type).toBe("TEXT");
+    expect(JSON.parse(String(params.text_attachment))).toEqual({ plaintext: "The long part." });
+    const linked = containerParams({ text: "Short.", text_attachment: { plaintext: "Long.", link_attachment_url: "https://a.example" } });
+    expect(JSON.parse(String(linked.text_attachment))).toEqual({ plaintext: "Long.", link_attachment_url: "https://a.example" });
+    expect(containerParams({ text: "Short." }).text_attachment).toBeUndefined();
+  });
+
+  it("holds 10,000 characters and refuses one more", () => {
+    expect(() => validate({ text: "Short.", text_attachment: { plaintext: "a".repeat(10_000) } })).not.toThrow();
+    expect(() => validate({ text: "Short.", text_attachment: { plaintext: "a".repeat(10_001) } })).toThrow(/10001 characters/);
+  });
+
+  it("needs its text", () => {
+    expect(() => validate({ text: "Short.", text_attachment: { plaintext: "  " } })).toThrow(/needs its text/);
+  });
+
+  it("goes only on a text-only post", () => {
+    expect(() =>
+      validate({ text: "Short.", image_url: "https://cdn.example.com/a.jpg", text_attachment: { plaintext: "Long." } }),
+    ).toThrow(/text-only post/);
+  });
+
+  it("refuses a link of its own when the post already has a link card", () => {
+    expect(() =>
+      validate({
+        text: "Short.",
+        link_attachment: "https://a.example",
+        text_attachment: { plaintext: "Long.", link_attachment_url: "https://b.example" },
+      }),
+    ).toThrow(/link card/);
+  });
+
+  it("counts its link toward the post's five", () => {
+    const five = Array.from({ length: 5 }, (_, i) => `https://site${i}.example`).join(" ");
+    expect(validate({ text: five, text_attachment: { plaintext: "Long.", link_attachment_url: "https://site0.example" } })).toEqual([]);
+    const warnings = validate({ text: five, text_attachment: { plaintext: "Long.", link_attachment_url: "https://site5.example" } });
+    expect(warnings.join(" ")).toMatch(/6 distinct URLs/);
+  });
+});

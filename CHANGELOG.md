@@ -7,6 +7,15 @@
 
 ---
 
+## Unreleased
+
+- **Text attachments.** `create_post` and `stage_post` take `text_attachment`, the long writing under a text-only post that Meta's Text Attachments page documents: up to 10,000 characters and one link, refused with media or beside a link card, its link counted toward the post's five. `get_post` shows it as `<attachment>`.
+- **Link clicks are read.** `get_account_insights` dropped `clicks`, which Meta returns in its own `link_total_values` envelope. It now gives the total and `clicks_by_link`.
+- **The window is named right.** With no `since` or `until`, `get_account_insights` said "lifetime". Meta's default is yesterday through today, and the result now says that.
+- **A missing number stays missing.** `get_top_posts` wrote 0 for any metric Meta did not return, and an engagement rate of 0 for a post with no views. Those are now `null`, listed last.
+- **What a reply replies to.** `get_post` now shows `replied_to` and `root_post` for a reply, asked for apart from the post's own fields so a refusal never takes the read down.
+- **The README stops promising `<engagement>` in listings**, which no tool ever wrote.
+
 ## 2.0.1, 2026-10-05
 
 - **Built on Slipway 0.1.17**, which a fresh install of 2.0.0 already used. Since the Slipway 2.0.0 was measured on, 0.1.7, `which` also reads a tool's argument names and prints a title once where a description opens with it, and the general help names the settings that connect an account and the safety switches and counts the rest, which `agent-context` describes one by one. [Slipway's changelog](https://github.com/thenavidm/slipway/blob/main/CHANGELOG.md) lists the rest.

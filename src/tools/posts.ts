@@ -52,6 +52,18 @@ const composeArgs = {
     .string()
     .optional()
     .describe("One topic tag, without the #. 1-50 characters, no periods or ampersands."),
+  text_attachment: z
+    .object({
+      plaintext: z.string().describe("The long text, up to 10,000 characters."),
+      link_attachment_url: z
+        .string()
+        .optional()
+        .describe("One link inside the attachment. Not allowed when the post already has link_attachment."),
+    })
+    .optional()
+    .describe(
+      "Long writing under a text-only post, up to 10,000 characters and one link. Not with an image, a video or a carousel.",
+    ),
   reply_to_id: z.string().optional().describe("Numeric id of the post this replies to."),
   quote_post_id: z.string().optional().describe("Numeric id of a post to quote."),
   reply_control: replyControl,
@@ -71,7 +83,7 @@ export const createPost = defineTool({
   name: "create_post",
   title: "Publish a post",
   description:
-    "Publish one post to Threads: creates the media container, waits for it to finish processing, then publishes. Public the moment it runs, and Threads has no edit endpoint, so this needs confirm: true. For anything over 500 characters use create_thread instead.",
+    "Publish one post to Threads: creates the media container, waits for it to finish processing, then publishes. Public the moment it runs, and Threads has no edit endpoint, so this needs confirm: true. For anything over 500 characters, use create_thread, or put the long text in text_attachment.",
   schema: { ...composeArgs, ...accountArg, ...confirmArg },
   risk: "destructive",
   summary: (args) => `post to Threads: "${snippet(args.text)}"`,
@@ -83,6 +95,7 @@ export const createPost = defineTool({
       video_url: args.video_url,
       alt_text: args.alt_text,
       link_attachment: args.link_attachment,
+      text_attachment: args.text_attachment,
       topic_tag: args.topic_tag,
       reply_to_id: args.reply_to_id ? requireMediaId(args.reply_to_id) : undefined,
       quote_post_id: args.quote_post_id ? requireMediaId(args.quote_post_id) : undefined,
@@ -206,6 +219,7 @@ export const stagePost = defineTool({
       video_url: args.video_url,
       alt_text: args.alt_text,
       link_attachment: args.link_attachment,
+      text_attachment: args.text_attachment,
       topic_tag: args.topic_tag,
       reply_to_id: args.reply_to_id ? requireMediaId(args.reply_to_id) : undefined,
       quote_post_id: args.quote_post_id ? requireMediaId(args.quote_post_id) : undefined,

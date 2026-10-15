@@ -463,7 +463,7 @@ over the CLI (five runs each), and about 78,750 on both over MCP.
 
 | Tool | Arguments |
 |---|---|
-| `create_post` | `text`, `image_url`, `video_url`, `alt_text`, `link_attachment`, `topic_tag`, `reply_to_id`, `quote_post_id`, `reply_control`, `allowlisted_country_codes`, `enable_reply_approvals`, `confirm` |
+| `create_post` | `text`, `image_url`, `video_url`, `alt_text`, `link_attachment`, `text_attachment`, `topic_tag`, `reply_to_id`, `quote_post_id`, `reply_control`, `allowlisted_country_codes`, `enable_reply_approvals`, `confirm` |
 | `create_thread` | `posts[]`, `image_url`, `video_url`, `alt_text`, `link_attachment`, `topic_tag`, `reply_to_id`, `reply_control`, `confirm` |
 | `create_carousel` | `items[]`, `text`, `topic_tag`, `reply_control`, `confirm` |
 | `stage_post` | Everything `create_post` takes, minus `confirm`. Builds a container, publishes nothing |
@@ -505,9 +505,9 @@ Threads exposes three different reply views and they are not interchangeable. `g
 | `get_follower_demographics` | `breakdown` (`country`, `city`, `age`, `gender`) |
 | `get_top_posts` | `sample`, `sort_by` |
 
-`get_top_posts` is the one that does not map to an endpoint. It fetches recent posts, pulls metrics for each, and ranks by engagement against views. That costs one request per post, so the sample is capped at 50 and the result says what it scored.
+`get_top_posts` is the one that does not map to an endpoint. It fetches recent posts, pulls metrics for each, and ranks by engagement against views. That costs one request per post, so the sample is capped at 50 and the result says what it scored. A number Meta did not return stays `null`, never 0, and those posts are listed last, so a post with no reported views is not mistaken for one nobody saw.
 
-Profile insights only go back to 13 April 2024, and are unreliable before 1 June 2024. Earlier windows return nothing rather than an error.
+Profile insights only go back to 13 April 2024, and are unreliable before 1 June 2024. Earlier windows return nothing rather than an error. With no `since` or `until`, Meta answers for yesterday through today, and the result says so. Link clicks come with their split by link, as `clicks_by_link`.
 
 ### Search and discovery
 
@@ -624,6 +624,7 @@ Publishing into the middle of that fails with an error that says nothing about t
 ### Link cards, topic tags and quotes
 
 - **Link card:** `link_attachment` renders a preview. Text-only posts only, so it cannot be combined with media.
+- **Text attachment:** `text_attachment` carries long writing under a text-only post, `{"plaintext": "…", "link_attachment_url": "…"}`, up to 10,000 characters and one link. It cannot go with media, and its link is refused when the post already has a link card. Its link counts toward the post's five. From the CLI, pass it as JSON: `--text-attachment '{"plaintext": "…"}'`.
 - **Topic tag:** one per post, written without a `#`, 1 to 50 characters, no periods or ampersands. A leading `#` is stripped rather than refused.
 - **Quote:** `quote_post_id`, or the `quote_post` tool.
 - **Links in text:** at most five distinct URLs, which is a warning rather than a refusal.
@@ -658,7 +659,6 @@ Listings come back as tagged text rather than Graph API JSON, roughly a tenth th
 The post text, exactly as published.
     </content>
     <media type="image" url="https://…" alt="…" />
-    <engagement>1204 views, 38 likes, 4 replies</engagement>
   </post>
 
   <post id="17925…" type="reply" replied_to="17924…" hidden="HIDDEN">…</post>
@@ -670,7 +670,8 @@ The post text, exactly as published.
 - `replied_to` and `root_post` carry thread structure without reordering the list.
 - A quoted or reposted post nests as `<quoted_post>` or `<reposted_post>`, rather than being flattened. A repost with no text of its own is otherwise indistinguishable from an empty post.
 - `hidden` appears on replies you have hidden, so a gap in a conversation is visible instead of implied.
-- `<engagement>` appears only where insights were joined on, which is `get_top_posts` and `get_post_insights`.
+- A text attachment shows as `<attachment>`, its text reproduced exactly, with its `link` when it has one.
+- Numbers are not joined onto listings. `get_post_insights`, `get_account_insights` and `get_top_posts` return them as JSON.
 - `cursor` on the root element continues the listing.
 
 Post text is reproduced exactly, including its own line breaks. Nothing indents inside `<content>`.

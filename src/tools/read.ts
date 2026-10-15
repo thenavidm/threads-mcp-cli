@@ -8,7 +8,7 @@
 
 import { z } from "zod";
 import { accountArg, clamp, defineTool, pageArgs } from "./kit.js";
-import { POST_FIELDS } from "../api/client.js";
+import { POST_FIELDS, REPLY_LINK_FIELDS } from "../api/client.js";
 import { cursorOf, dataOf, renderList, renderPost } from "../format/posts.js";
 import { requireMediaId } from "../api/identity.js";
 
@@ -86,7 +86,7 @@ export const getPost = defineTool({
   name: "get_post",
   title: "Read one post",
   description:
-    "One Threads post by its numeric id, with its full field set: text, media, permalink, topic tag, link attachment, quoted post and whether it has replies.",
+    "One Threads post by its numeric id, with its full field set: text, media, permalink, topic tag, link attachment, text attachment, quoted post, whether it has replies, and for a reply, the post it replies to and the thread's first post.",
   schema: {
     id: z.string().describe("Numeric post id."),
     ...accountArg,
@@ -98,6 +98,18 @@ export const getPost = defineTool({
     const post = (await ctx.client.call(account, `/${id}`, {
       params: { fields: `${POST_FIELDS},allowlisted_country_codes` },
     })) as Record<string, unknown>;
+    // Where a reply sits is asked for on its own. If Threads refuses the fields,
+    // the post still comes back, just without them.
+    try {
+      const link = (await ctx.client.call(account, `/${id}`, {
+        params: { fields: REPLY_LINK_FIELDS },
+      })) as Record<string, unknown>;
+      for (const key of ["is_reply", "replied_to", "root_post"]) {
+        if (link[key] !== undefined) post[key] = link[key];
+      }
+    } catch {
+      // Not a reply, or not readable: nothing to add.
+    }
     return renderPost(post, 0);
   },
 });
