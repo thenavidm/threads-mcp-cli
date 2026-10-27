@@ -219,7 +219,7 @@ export function loadConfig(stored: Account[] = []): Config {
  *
  * With no hint: the first configured `THREADS_DEFAULT_ACCOUNT` that is actually
  * connected, else the first account. Exact username match beats prefix match,
- * because "navid" is a prefix of "navidmedia", and a prefix-first search would
+ * because "acme" is a prefix of "acmemedia", and a prefix-first search would
  * hand an unnamed post to the wrong profile whenever both are connected. A
  * name that matches nothing fails and lists what is connected, rather than
  * quietly posting somewhere else.

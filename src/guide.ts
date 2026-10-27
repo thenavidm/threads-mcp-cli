@@ -79,9 +79,9 @@ Listings come back as tagged text rather than raw Graph API JSON, roughly a tent
 the text where you expect it.
 
 \`\`\`xml
-<posts count="2" account="thenavidm" cursor="…">
-  <post id="17924…" type="standalone" url="https://www.threads.com/@thenavidm/post/C…"
-        author="thenavidm" posted_at="2026-08-31T09:14:02.000Z" topic_tag="buildinpublic">
+<posts count="2" account="yourname" cursor="…">
+  <post id="17924…" type="standalone" url="https://www.threads.com/@yourname/post/C…"
+        author="yourname" posted_at="2026-08-31T09:14:02.000Z" topic_tag="buildinpublic">
     <content>
 The post text, exactly as published.
     </content>
